@@ -132,4 +132,3 @@ dmypy.json
 .idea/
 
 training_checkpoints/
-*.png
