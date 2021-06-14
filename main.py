@@ -15,9 +15,7 @@ BATCH_SIZE = 10
 CLASSIFIER_BATCH_SIZE = 15
 kernel_length = 5
 noise_dim = 100
-max_input_value = 10000
-mid_value = max_input_value / 2
-dataset_file = "data/" + "data.mat"
+dataset_file = "data/" + "target_based_samples.mat"
 checkpoint_dir = './training_checkpoints'
 EPOCHS = 2
 num_examples_to_generate = 500
@@ -27,12 +25,14 @@ cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
 seed = tf.random.normal([num_examples_to_generate, noise_dim])
 
-classes_array = [124,
-                 64,
-                 147,
-                 129,
-                 193
-                 ]
+# classes_array = [124,
+#                  64,
+#                  147,
+#                  129,
+#                  193
+#                  ]
+
+classes_array = [6, 18, 11, 1, 5]
 
 train_dataset = spio.loadmat(dataset_file)
 total_trainset = train_dataset["data"]
@@ -47,8 +47,11 @@ def denormalize_data(normalized_data, mid_value):
 
 
 # Normalize data
+max_input_value = np.max(total_trainset)
+mid_value = max_input_value / 2
 normalized_input_data = normalize_data(total_trainset, mid_value)
 num_bands = normalized_input_data.shape[0]
+print("mid value ", mid_value)
 print("number of bands = ", num_bands)
 
 
@@ -169,7 +172,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
     plt.savefig(IMAGE_DIR + 'generated_' + checkpoint_prefix + '.png')
 
     plt.figure()
-    for i in range(min(predictions.shape[0], 4)):
+    for i in range(min(predictions.shape[0], 1)):
         x = range(predictions.shape[1])
         y = denormalize_data(before_tensor_input[i], mid_value)
         plt.plot(x, y, label="original input sample" + checkpoint_prefix + str(i))
@@ -274,7 +277,7 @@ def start_train():
             label_columns[k][class_index] = 1
             k = k + 1
     prediction = model(final_evaluation_data)
-    np.savetxt('prediction_'+ str(EPOCHS) + '.csv', prediction, fmt='%5.10f')
+    np.savetxt('prediction_' + str(EPOCHS) + '.csv', prediction, fmt='%5.10f')
     # Print prediction for first 5 rows
     #print(prediction[:5, :])
     final_loss = classifier_loss_fn(label_columns, prediction)
