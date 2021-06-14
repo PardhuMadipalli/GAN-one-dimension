@@ -19,8 +19,9 @@ max_input_value = 10000
 mid_value = max_input_value / 2
 dataset_file = "data/" + "data.mat"
 checkpoint_dir = './training_checkpoints'
-EPOCHS = 1000
+EPOCHS = 2
 num_examples_to_generate = 500
+IMAGE_DIR = "img/"
 
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
 
@@ -165,7 +166,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
         # plt.imshow(predictions[i, :, 0] * mid_value + mid_value, cmap='gray')
         # plt.axis('off')
     plt.legend()
-    plt.savefig('generated_' + checkpoint_prefix + '.png')
+    plt.savefig(IMAGE_DIR + 'generated_' + checkpoint_prefix + '.png')
 
     plt.figure()
     for i in range(min(predictions.shape[0], 4)):
@@ -173,7 +174,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
         y = denormalize_data(before_tensor_input[i], mid_value)
         plt.plot(x, y, label="original input sample" + checkpoint_prefix + str(i))
     plt.legend()
-    plt.savefig('original_' + checkpoint_prefix + '.png')
+    plt.savefig(IMAGE_DIR + 'original_' + checkpoint_prefix + '.png')
 
     pred_shape = predictions.shape
     predictions = predictions.numpy()
@@ -227,12 +228,14 @@ def classifier_train(dataset, epochs, model):
         tf.print('Time for epoch {} is {} sec'.format(epoch + 1, time.time() - start))
 
 
-def main():
+def start_train():
     start = 0
     generated_samples = np.empty(shape=(0, num_bands))
     for i, number_of_samples_in_class in enumerate(classes_array):
         print("class:", i)
-        class_trainset = normalized_input_data[:, start:number_of_samples_in_class]
+        end = start + number_of_samples_in_class
+        print("using start=", start, "end=", end)
+        class_trainset = normalized_input_data[:, start:end]
         class_trainset = np.transpose(class_trainset)
         before_tensor_input = np.copy(class_trainset)
         class_trainset = tf.convert_to_tensor(class_trainset, dtype=tf.float32)
@@ -247,6 +250,7 @@ def main():
 
         generated_samples = train(class_trainset, EPOCHS, before_tensor_input, generator, discriminator, checkpoint_prefix, checkpoint,
                                   generated_samples)
+        start = start + number_of_samples_in_class
         #print("total generated_sample shape", generated_samples.shape)
 
     label_columns = np.zeros(shape=(num_examples_to_generate * len(classes_array), len(classes_array)))
@@ -277,7 +281,14 @@ def main():
     print("final loss with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
 
 
-main()
+def main():
+    start_train()
+
+
+if __name__ == "__main__":
+    main()
+
+
 
 
 #checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
