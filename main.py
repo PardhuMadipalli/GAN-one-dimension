@@ -17,8 +17,9 @@ kernel_length = 5
 noise_dim = 100
 dataset_file = "data/" + "target_based_samples.mat"
 checkpoint_dir = './training_checkpoints'
-EPOCHS = 2
-num_examples_to_generate = 500
+EPOCHS = 1
+classifier_checkpoint_prefix = os.path.join(checkpoint_dir, "classifier" + str(EPOCHS))
+num_examples_to_generate = 5
 IMAGE_DIR = "img/"
 
 cross_entropy = tf.keras.losses.BinaryCrossentropy(from_logits=True)
@@ -38,20 +39,26 @@ train_dataset = spio.loadmat(dataset_file)
 total_trainset = train_dataset["data"]
 
 
-def normalize_data(data, mid_value):
-    return (data - mid_value) / mid_value
+
+# def normalize_data(data, mid_value):
+#     return (data - mid_value) / mid_value
 
 
-def denormalize_data(normalized_data, mid_value):
-    return (normalized_data * mid_value) + mid_value
+def normalize_data(data):
+    max_input = np.max(data)
+    mid_input = max_input/2
+    return (data - mid_input) / mid_input
+
+
+def denormalize_data(normalized_data):
+    max_input = np.max(normalized_data)
+    mid_input = max_input/2
+    return (normalized_data * mid_input) + mid_input
 
 
 # Normalize data
-max_input_value = np.max(total_trainset)
-mid_value = max_input_value / 2
-normalized_input_data = normalize_data(total_trainset, mid_value)
+normalized_input_data = normalize_data(total_trainset)
 num_bands = normalized_input_data.shape[0]
-print("mid value ", mid_value)
 print("number of bands = ", num_bands)
 
 
@@ -111,6 +118,7 @@ def generator_loss(fake_output):
 
 generator_optimizer = tf.keras.optimizers.Adam(1e-4)
 discriminator_optimizer = tf.keras.optimizers.Adam(1e-4)
+classifier_optimizer = tf.keras.optimizers.Adam(1e-4)
 
 
 # Notice the use of `tf.function`
@@ -144,7 +152,7 @@ def train(dataset, epochs, before_tensor_input, generator, discriminator, checkp
         #tf.print("epoch number is " + str(epoch))
         start = time.time()
         i = 0
-        for batch in tf.data.Dataset.from_tensor_slices(dataset).batch(BATCH_SIZE):
+        for batch in tf.data.Dataset.from_tensor_slices(dataset).shuffle(20).batch(BATCH_SIZE):
             # tf.print("batch shape is " + str(batch.shape))
             #tf.print("batch number is " + str(i))
             i = i + 1
@@ -162,7 +170,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
     checkpoint_prefix = checkpoint_prefix.split("/")[-1]
     plt.figure()
     for i in range(min(predictions.shape[0], 4)):
-        y = denormalize_data(predictions[i], mid_value)
+        y = denormalize_data(predictions[i])
         x = range(predictions.shape[1])
         plt.plot(x, y, label="genereted image " + checkpoint_prefix + str(i))
         # plt.subplot(4, 4, i+1)
@@ -174,7 +182,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
     plt.figure()
     for i in range(min(predictions.shape[0], 1)):
         x = range(predictions.shape[1])
-        y = denormalize_data(before_tensor_input[i], mid_value)
+        y = denormalize_data(before_tensor_input[i])
         plt.plot(x, y, label="original input sample" + checkpoint_prefix + str(i))
     plt.legend()
     plt.savefig(IMAGE_DIR + 'original_' + checkpoint_prefix + '.png')
@@ -195,29 +203,39 @@ classifier_loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
 
 def make_classifier_model():
     model = tf.keras.Sequential()
-    model.add(layers.Dense(20))
-    model.add(layers.BatchNormalization())
+    model.add(layers.Conv1D(64, 5, strides=1, padding='same', use_bias=False, kernel_regularizer=None))
     model.add(layers.LeakyReLU())
-    # model.add(layers.Conv1DTranspose(15, kernel_length, strides=1, padding='same', use_bias=False))
-    # model.add(layers.Conv1DTranspose(10, kernel_length, strides=1, padding='same', use_bias=False, activation='tanh'))
-    model.add(layers.Dense(len(classes_array)))
+    model.add(layers.Dropout(0.3))
 
+    model.add(layers.Conv1D(128, 5, strides=1, padding='same', use_bias=False, kernel_regularizer=None))
+    model.add(layers.LeakyReLU())
+    model.add(layers.Dropout(0.3))
+
+    model.add(layers.Conv1D(72, 5, strides=1, padding='same', use_bias=False, kernel_regularizer=None))
+    model.add(layers.LeakyReLU())
+    model.add(layers.Dropout(0.3))
+
+    model.add(layers.Flatten())
+    model.add(layers.Dense(len(classes_array), use_bias=False, kernel_regularizer=None))
     return model
+
 
 @tf.function
 def classifier_train_step(train_features, train_labels, model):
     with tf.GradientTape() as tape:
-        logits = model(train_features, training=True)  # Logits for this minibatch
+        train_features_reshaped = np.reshape(train_features, (train_features.shape[0], train_features.shape[1], 1))
+        tf.print("reshaped size: "+ str(train_features_reshaped.shape))
+        logits = model(train_features_reshaped, training=True)  # Logits for this minibatch
         # Compute the loss value for this minibatch.
         #print('train features shape: ', train_features.shape)
         #print('training labels shapes: ', train_labels.shape)
         #print('logits shapes: ', logits.shape)
         loss_value = classifier_loss_fn(train_labels, logits)
     gradients_of_classifier = tape.gradient(loss_value, model.trainable_variables)
-    generator_optimizer.apply_gradients(zip(gradients_of_classifier, model.trainable_variables))
+    classifier_optimizer.apply_gradients(zip(gradients_of_classifier, model.trainable_variables))
 
 
-def classifier_train(dataset, epochs, model):
+def classifier_train(dataset, epochs, model, checkpoint, checkpoint_prefix_classifier):
     for epoch in range(epochs):
         # tf.print("epoch number is " + str(epoch))
         start = time.time()
@@ -229,15 +247,18 @@ def classifier_train(dataset, epochs, model):
             classifier_train_step(batch[:, :num_bands], batch[:, num_bands:], model)
         # Save the model every 1 epochs
         tf.print('Time for epoch {} is {} sec'.format(epoch + 1, time.time() - start))
+    #checkpoint.save(file_prefix=checkpoint_prefix_classifier)
+    model.save_weights(filepath=checkpoint_prefix_classifier)
 
 
 def start_train():
+    global checkpoint_prefix
     start = 0
     generated_samples = np.empty(shape=(0, num_bands))
     for i, number_of_samples_in_class in enumerate(classes_array):
         print("class:", i)
         end = start + number_of_samples_in_class
-        print("using start=", start, "end=", end)
+        #print("using start=", start, "end=", end)
         class_trainset = normalized_input_data[:, start:end]
         class_trainset = np.transpose(class_trainset)
         before_tensor_input = np.copy(class_trainset)
@@ -263,36 +284,46 @@ def start_train():
             label_columns[k][class_index] = 1
             k = k + 1
     labelled_generated_samples = np.hstack((generated_samples, label_columns))
-    #print("shape after resampling: ", labelled_generated_samples.shape)
-    #print(labelled_generated_samples)
+    # print("shape after resampling: ", labelled_generated_samples.shape)
+    # print(generated_samples.shape)
+    #print(label_columns)
     model = make_classifier_model()
-    classifier_train(labelled_generated_samples, EPOCHS, model)
+    classifier_checkpoint = tf.train.Checkpoint(classifier_optimizer=classifier_optimizer,
+                                                model=model)
+    classifier_train(labelled_generated_samples, EPOCHS, model, classifier_checkpoint, classifier_checkpoint_prefix)
 
     final_evaluation_data = np.transpose(normalized_input_data)
-    #print("normalised input shape", final_evaluation_data.shape)
     label_columns = np.zeros(shape=(final_evaluation_data.shape[0], len(classes_array)))
     k = 0
     for class_index, samples_in_class in enumerate(classes_array):
         for i in range(samples_in_class):
             label_columns[k][class_index] = 1
             k = k + 1
-    prediction = model(final_evaluation_data)
-    np.savetxt('prediction_' + str(EPOCHS) + '.csv', prediction, fmt='%5.10f')
+    evluation_data_reshaped = np.reshape(final_evaluation_data, (final_evaluation_data.shape[0], final_evaluation_data.shape[1], 1))
+    prediction = model(evluation_data_reshaped, training=False)
+    np.savetxt('prediction_' + str(EPOCHS) + '.csv', prediction, fmt='%5.10f', delimiter=',')
     # Print prediction for first 5 rows
     #print(prediction[:5, :])
     final_loss = classifier_loss_fn(label_columns, prediction)
-    print("final loss with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
+    #print("final loss with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
 
 
-def main():
-    start_train()
+def reload_classifier(dataset):
+    dataset = np.transpose(normalize_data(dataset))
+    dataset = np.reshape(dataset, (dataset.shape[0], dataset.shape[1], 1))
+    model = make_classifier_model()
+    model.load_weights(filepath=classifier_checkpoint_prefix).expect_partial()
+    new_pred = model(dataset, training=False)
+    np.savetxt('prediction_reload' + str(EPOCHS) + '.csv', new_pred, fmt='%5.10f', delimiter=',')
+    return new_pred
+    # classifier_checkpoint = tf.train.Checkpoint(classifier_optimizer=classifier_optimizer, model=model)
+    # classifier_checkpoint.restore(classifier_checkpoint_prefix + '-1.index')
 
 
 if __name__ == "__main__":
-    main()
-
-
-
+    start_train()
+    # dataset=
+    # reload_classifier(dataset)
 
 #checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
 
