@@ -15,10 +15,10 @@ BATCH_SIZE = 10
 CLASSIFIER_BATCH_SIZE = 15
 kernel_length = 5
 noise_dim = 100
-dataset_file = "data/" + "target_based_samples.mat"
+# dataset_file = "data/" + "target_based_samples.mat"
 checkpoint_dir = './training_checkpoints'
 EPOCHS = 1
-classifier_checkpoint_prefix = os.path.join(checkpoint_dir, "classifier" + str(EPOCHS))
+# classifier_checkpoint_prefix = os.path.join(checkpoint_dir, "classifier" + str(EPOCHS))
 num_examples_to_generate = 5
 IMAGE_DIR = "img/"
 
@@ -33,15 +33,10 @@ seed = tf.random.normal([num_examples_to_generate, noise_dim])
 #                  193
 #                  ]
 
-classes_array = [6, 18, 11, 1, 5]
+# classes_array = [6, 18, 11, 1, 5]
 
-train_dataset = spio.loadmat(dataset_file)
-total_trainset = train_dataset["data"]
-
-
-
-# def normalize_data(data, mid_value):
-#     return (data - mid_value) / mid_value
+# train_dataset = spio.loadmat(dataset_file)
+# total_trainset = train_dataset["data"]
 
 
 def normalize_data(data):
@@ -57,9 +52,9 @@ def denormalize_data(normalized_data):
 
 
 # Normalize data
-normalized_input_data = normalize_data(total_trainset)
-num_bands = normalized_input_data.shape[0]
-print("number of bands = ", num_bands)
+#normalized_input_data = normalize_data(total_trainset)
+num_bands = 0
+#print("number of bands = ", num_bands)
 
 
 def make_generator_model():
@@ -201,7 +196,7 @@ def generate_and_save_images(model, epoch, test_input, before_tensor_input, chec
 classifier_loss_fn = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
 
 
-def make_classifier_model():
+def make_classifier_model(num_classes):
     model = tf.keras.Sequential()
     model.add(layers.Conv1D(64, 5, strides=1, padding='same', use_bias=False, kernel_regularizer=None))
     model.add(layers.LeakyReLU())
@@ -216,7 +211,7 @@ def make_classifier_model():
     model.add(layers.Dropout(0.3))
 
     model.add(layers.Flatten())
-    model.add(layers.Dense(len(classes_array), use_bias=False, kernel_regularizer=None))
+    model.add(layers.Dense(num_classes, use_bias=False, kernel_regularizer=None))
     return model
 
 
@@ -224,7 +219,7 @@ def make_classifier_model():
 def classifier_train_step(train_features, train_labels, model):
     with tf.GradientTape() as tape:
         train_features_reshaped = np.reshape(train_features, (train_features.shape[0], train_features.shape[1], 1))
-        tf.print("reshaped size: "+ str(train_features_reshaped.shape))
+        #tf.print("reshaped size: "+ str(train_features_reshaped.shape))
         logits = model(train_features_reshaped, training=True)  # Logits for this minibatch
         # Compute the loss value for this minibatch.
         #print('train features shape: ', train_features.shape)
@@ -251,8 +246,9 @@ def classifier_train(dataset, epochs, model, checkpoint, checkpoint_prefix_class
     model.save_weights(filepath=checkpoint_prefix_classifier)
 
 
-def start_train():
-    global checkpoint_prefix
+def start_train(normalized_input_data, classes_array):
+    global num_bands
+    num_bands = normalized_input_data.shape[0]
     start = 0
     generated_samples = np.empty(shape=(0, num_bands))
     for i, number_of_samples_in_class in enumerate(classes_array):
@@ -275,8 +271,10 @@ def start_train():
         generated_samples = train(class_trainset, EPOCHS, before_tensor_input, generator, discriminator, checkpoint_prefix, checkpoint,
                                   generated_samples)
         start = start + number_of_samples_in_class
-        #print("total generated_sample shape", generated_samples.shape)
 
+    print("GAN training is done, total generated samples count:", str(generated_samples.shape[0]))
+    print("")
+    print("***** Starting Classification *****")
     label_columns = np.zeros(shape=(num_examples_to_generate * len(classes_array), len(classes_array)))
     k = 0
     for class_index in range(len(classes_array)):
@@ -287,10 +285,11 @@ def start_train():
     # print("shape after resampling: ", labelled_generated_samples.shape)
     # print(generated_samples.shape)
     #print(label_columns)
-    model = make_classifier_model()
+    model = make_classifier_model(len(classes_array))
     classifier_checkpoint = tf.train.Checkpoint(classifier_optimizer=classifier_optimizer,
                                                 model=model)
-    classifier_train(labelled_generated_samples, EPOCHS, model, classifier_checkpoint, classifier_checkpoint_prefix)
+    classifier_train(labelled_generated_samples, EPOCHS, model, classifier_checkpoint,
+                     get_classifier_checkpoint_prefix(EPOCHS))
 
     final_evaluation_data = np.transpose(normalized_input_data)
     label_columns = np.zeros(shape=(final_evaluation_data.shape[0], len(classes_array)))
@@ -301,27 +300,64 @@ def start_train():
             k = k + 1
     evluation_data_reshaped = np.reshape(final_evaluation_data, (final_evaluation_data.shape[0], final_evaluation_data.shape[1], 1))
     prediction = model(evluation_data_reshaped, training=False)
-    np.savetxt('prediction_' + str(EPOCHS) + '.csv', prediction, fmt='%5.10f', delimiter=',')
+    predictions_file = 'prediction_' + str(EPOCHS) + '.csv'
+    np.savetxt(predictions_file, prediction, fmt='%5.10f', delimiter=',')
+    print("Saved predictions in the file:", predictions_file)
     # Print prediction for first 5 rows
     #print(prediction[:5, :])
     final_loss = classifier_loss_fn(label_columns, prediction)
-    #print("final loss with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
+    print("final loss of classifier with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
 
 
-def reload_classifier(dataset):
+def reload_classifier(dataset_name, dataset, num_classes, pred_epochs_count):
+    print()
+    print('***** Starting prediction of dataset %s by reloading weights *****' % dataset_name)
+    checkpoint_pref = get_classifier_checkpoint_prefix(pred_epochs_count)
+    print("using weights saved in", checkpoint_pref)
     dataset = np.transpose(normalize_data(dataset))
     dataset = np.reshape(dataset, (dataset.shape[0], dataset.shape[1], 1))
-    model = make_classifier_model()
-    model.load_weights(filepath=classifier_checkpoint_prefix).expect_partial()
+    model = make_classifier_model(num_classes)
+    model.load_weights(filepath=checkpoint_pref).expect_partial()
     new_pred = model(dataset, training=False)
-    np.savetxt('prediction_reload' + str(EPOCHS) + '.csv', new_pred, fmt='%5.10f', delimiter=',')
+    pred_reload_file = 'prediction_reload_' + dataset_name + '_' + str(pred_epochs_count) + '.csv'
+    np.savetxt(pred_reload_file, new_pred, fmt='%5.10f', delimiter=',')
+    print("Saved predictions in", pred_reload_file)
     return new_pred
-    # classifier_checkpoint = tf.train.Checkpoint(classifier_optimizer=classifier_optimizer, model=model)
-    # classifier_checkpoint.restore(classifier_checkpoint_prefix + '-1.index')
+
+
+def main(dataset_name, classes_array=None, pred_epochs_count=1000, num_classes=None):
+    """
+
+    :param num_classes:
+    :param dataset_name:
+    :param classes_array:
+    :param pred_epochs_count:
+    :return:
+    """
+    dataset_file_name = "data/" + dataset_name + ".mat"
+    print("loading data from", dataset_file_name)
+    training_dataset = spio.loadmat(dataset_file_name)
+    training_data = training_dataset["data"]
+    normalised_data = normalize_data(training_data)
+    if classes_array is not None:
+        print("Classes array is provided. Doing training")
+        start_train(normalised_data, classes_array)
+    else:
+        print("Classes array not provided hence doing classification by reloading weights.")
+        if num_classes is None:
+            raise ValueError("num_classes is not provided for reload classifier operation")
+        reload_classifier(dataset_name, normalised_data, num_classes, pred_epochs_count)
+
+
+def get_classifier_checkpoint_prefix(epochs):
+    return os.path.join(checkpoint_dir, "classifier_" + str(epochs))
 
 
 if __name__ == "__main__":
-    start_train()
+    main("data", [124, 64, 147, 129, 193])
+    main("target_based_samples", pred_epochs_count=1, num_classes=5)
+
+    #                  ])
     # dataset=
     # reload_classifier(dataset)
 
