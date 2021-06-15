@@ -1,14 +1,14 @@
 import scipy.io as spio
 import numpy as np
-import tensorflow as tf
 
-TARGET_BASED_SAMPLES_MAT_FILE = "data/target_based_samples.mat"
 
 def normalize_data(dataset):
     return dataset
 
 
-def target_based_classification(input_mat_file, num_targets):
+def target_based_classification(input_mat_file, num_targets, top_n=20, threshold_degrees=4,
+                                output_name='target_based_samples'):
+    print("Running target based sample generation from file", input_mat_file)
     dataset = spio.loadmat(input_mat_file)["pxl"]
     original_shape = dataset.shape
     dataset = np.reshape(dataset, (original_shape[0]*original_shape[1], original_shape[2]))
@@ -17,7 +17,7 @@ def target_based_classification(input_mat_file, num_targets):
     first_target_location = np.argmax(normalized_data_with_norm)
     first_target_value = normalized_data[first_target_location, :]
     class_values = find_class_elements(first_target_value, normalized_data_with_norm, normalized_data,
-                                       top_n=20, threshold_degrees=4)
+                                       top_n=top_n, threshold_degrees=threshold_degrees)
     num_bands = first_target_value.shape[0]
     final_class_values = np.empty((0, num_bands))
     final_class_count = []
@@ -33,15 +33,18 @@ def target_based_classification(input_mat_file, num_targets):
         max_index = np.argmax(temp)
         # print('U shape:', U.shape)
         max_values = np.reshape(np.transpose(normalized_data)[:, max_index], (num_bands, 1))
-        class_values = find_class_elements(max_values, temp, normalized_data, top_n=20, threshold_degrees=4)
+        class_values = find_class_elements(max_values, temp, normalized_data, top_n=top_n, threshold_degrees=threshold_degrees)
         final_class_values = np.concatenate((final_class_values, class_values))
         final_class_count.append(class_values.shape[0])
         # print('max_values shape', max_values.shape)
         U = np.hstack((U, max_values))
         #print('max index for target:', i, 'is', max_index)
 
-    spio.savemat(TARGET_BASED_SAMPLES_MAT_FILE, {"data": np.transpose(final_class_values)})
+    output_filename = "data/" + output_name + ".mat"
+    print("Saving the output in file:", output_filename)
+    spio.savemat(output_filename, {"data": np.transpose(final_class_values)})
     print(final_class_count)
+    return output_name, final_class_count
 
 
 # U = (167, 5)
@@ -62,5 +65,5 @@ def find_class_elements(class_vector, normalized_data_with_norm, normalized_data
     return top_n_values[class_indices]
 
 
-target_based_classification("data/HSI_3D.mat", 5)
+# target_based_classification("data/HSI_3D.mat", 5)
 

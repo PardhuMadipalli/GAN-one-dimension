@@ -17,8 +17,6 @@ kernel_length = 5
 noise_dim = 100
 # dataset_file = "data/" + "target_based_samples.mat"
 checkpoint_dir = './training_checkpoints'
-EPOCHS = 1
-# classifier_checkpoint_prefix = os.path.join(checkpoint_dir, "classifier" + str(EPOCHS))
 num_examples_to_generate = 5
 IMAGE_DIR = "img/"
 
@@ -246,7 +244,7 @@ def classifier_train(dataset, epochs, model, checkpoint, checkpoint_prefix_class
     model.save_weights(filepath=checkpoint_prefix_classifier)
 
 
-def start_train(normalized_input_data, classes_array):
+def start_train(normalized_input_data, classes_array, epochs):
     global num_bands
     num_bands = normalized_input_data.shape[0]
     start = 0
@@ -268,7 +266,7 @@ def start_train(normalized_input_data, classes_array):
                                          generator=generator,
                                          discriminator=discriminator)
 
-        generated_samples = train(class_trainset, EPOCHS, before_tensor_input, generator, discriminator, checkpoint_prefix, checkpoint,
+        generated_samples = train(class_trainset, epochs, before_tensor_input, generator, discriminator, checkpoint_prefix, checkpoint,
                                   generated_samples)
         start = start + number_of_samples_in_class
 
@@ -288,8 +286,8 @@ def start_train(normalized_input_data, classes_array):
     model = make_classifier_model(len(classes_array))
     classifier_checkpoint = tf.train.Checkpoint(classifier_optimizer=classifier_optimizer,
                                                 model=model)
-    classifier_train(labelled_generated_samples, EPOCHS, model, classifier_checkpoint,
-                     get_classifier_checkpoint_prefix(EPOCHS))
+    classifier_train(labelled_generated_samples, epochs, model, classifier_checkpoint,
+                     get_classifier_checkpoint_prefix(epochs))
 
     final_evaluation_data = np.transpose(normalized_input_data)
     label_columns = np.zeros(shape=(final_evaluation_data.shape[0], len(classes_array)))
@@ -300,13 +298,13 @@ def start_train(normalized_input_data, classes_array):
             k = k + 1
     evluation_data_reshaped = np.reshape(final_evaluation_data, (final_evaluation_data.shape[0], final_evaluation_data.shape[1], 1))
     prediction = model(evluation_data_reshaped, training=False)
-    predictions_file = 'prediction_' + str(EPOCHS) + '.csv'
+    predictions_file = 'prediction_' + str(epochs) + '.csv'
     np.savetxt(predictions_file, prediction, fmt='%5.10f', delimiter=',')
     print("Saved predictions in the file:", predictions_file)
     # Print prediction for first 5 rows
     #print(prediction[:5, :])
     final_loss = classifier_loss_fn(label_columns, prediction)
-    print("final loss of classifier with %d epochs is %3.10f" % (EPOCHS, final_loss.numpy()))
+    print("final loss of classifier with %d epochs is %3.10f" % (epochs, final_loss.numpy()))
 
 
 def reload_classifier(dataset_name, dataset, num_classes, pred_epochs_count):
@@ -325,9 +323,10 @@ def reload_classifier(dataset_name, dataset, num_classes, pred_epochs_count):
     return new_pred
 
 
-def main(dataset_name, classes_array=None, pred_epochs_count=1000, num_classes=None):
+def main(dataset_name, classes_array=None, training_epochs=1000, pred_epochs_count=1000, num_classes=None):
     """
 
+    :param training_epochs:
     :param num_classes:
     :param dataset_name:
     :param classes_array:
@@ -341,7 +340,8 @@ def main(dataset_name, classes_array=None, pred_epochs_count=1000, num_classes=N
     normalised_data = normalize_data(training_data)
     if classes_array is not None:
         print("Classes array is provided. Doing training")
-        start_train(normalised_data, classes_array)
+        print("Number of epochs:", training_epochs)
+        start_train(normalised_data, classes_array, training_epochs)
     else:
         print("Classes array not provided hence doing classification by reloading weights.")
         if num_classes is None:
@@ -354,7 +354,7 @@ def get_classifier_checkpoint_prefix(epochs):
 
 
 if __name__ == "__main__":
-    main("data", [124, 64, 147, 129, 193])
+    main("data", [124, 64, 147, 129, 193], training_epochs=1)
     main("target_based_samples", pred_epochs_count=1, num_classes=5)
 
     #                  ])
