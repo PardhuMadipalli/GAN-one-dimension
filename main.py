@@ -11,7 +11,7 @@ import time
 
 tf.config.run_functions_eagerly(True)
 
-BATCH_SIZE = 10
+BATCH_SIZE = 30
 CLASSIFIER_BATCH_SIZE = 15
 kernel_length = 5
 noise_dim = 100
@@ -132,7 +132,7 @@ def train_step(images, generator, discriminator):
 
         gen_loss = generator_loss(fake_output)
         disc_loss = discriminator_loss(real_output, fake_output)
-
+    print('disc_loss is ', disc_loss)
     gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
     gradients_of_discriminator = disc_tape.gradient(disc_loss, discriminator.trainable_variables)
     generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
@@ -224,6 +224,7 @@ def classifier_train_step(train_features, train_labels, model):
         #print('training labels shapes: ', train_labels.shape)
         #print('logits shapes: ', logits.shape)
         loss_value = classifier_loss_fn(train_labels, logits)
+        print('loss_value', loss_value)
     gradients_of_classifier = tape.gradient(loss_value, model.trainable_variables)
     classifier_optimizer.apply_gradients(zip(gradients_of_classifier, model.trainable_variables))
 
@@ -239,18 +240,25 @@ def classifier_train(dataset, epochs, model, checkpoint, checkpoint_prefix_class
             i = i + 1
             classifier_train_step(batch[:, :num_bands], batch[:, num_bands:], model)
         # Save the model every 1 epochs
-        tf.print('Time for epoch {} is {} sec'.format(epoch + 1, time.time() - start))
+        # tf.print('Time for epoch {} is {} sec'.format(epoch + 1, time.time() - start))
     #checkpoint.save(file_prefix=checkpoint_prefix_classifier)
     model.save_weights(filepath=checkpoint_prefix_classifier)
 
 
 def start_train(normalized_input_data, classes_array, epochs):
+    """
+
+    :param normalized_input_data: data in the shape of (r, c), where r is total number of rows(samples)
+        and c is number of points in eac row
+    :param classes_array:
+    :param epochs:
+    :return:
+    """
     global num_bands
     num_bands = normalized_input_data.shape[0]
     start = 0
     generated_samples = np.empty(shape=(0, num_bands))
     for i, number_of_samples_in_class in enumerate(classes_array):
-        print("class:", i)
         end = start + number_of_samples_in_class
         #print("using start=", start, "end=", end)
         class_trainset = normalized_input_data[:, start:end]
@@ -338,6 +346,7 @@ def main(dataset_name, classes_array=None, training_epochs=1000, pred_epochs_cou
     training_dataset = spio.loadmat(dataset_file_name)
     training_data = training_dataset["data"]
     normalised_data = normalize_data(training_data)
+    print('shape is ', normalised_data.shape)
     if classes_array is not None:
         print("Classes array is provided. Doing training")
         print("Number of epochs:", training_epochs)
@@ -354,8 +363,8 @@ def get_classifier_checkpoint_prefix(epochs):
 
 
 if __name__ == "__main__":
-    main("data", [124, 64, 147, 129, 193], training_epochs=1)
-    main("target_based_samples", pred_epochs_count=1, num_classes=5)
+    main("data", [124, 64, 147, 129, 193], training_epochs=20)
+    # main("target_based_samples", pred_epochs_count=1, num_classes=5)
 
     #                  ])
     # dataset=
